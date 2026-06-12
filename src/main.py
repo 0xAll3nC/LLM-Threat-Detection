@@ -22,6 +22,7 @@ else:
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 INPUT_PATH = PROJECT_ROOT / "data" / "alerts.csv"
 OUTPUT_PATH = PROJECT_ROOT / "outputs" / "prioritized_alerts.csv"
+MAX_ALERTS = 3
 
 
 def main() -> int:
@@ -48,6 +49,9 @@ def main() -> int:
     except OSError as exc:
         print(f"Could not read input CSV: {exc}")
         return 1
+
+    if MAX_ALERTS is not None:
+        alerts = alerts.head(MAX_ALERTS)
 
     prioritized_alerts = []
 

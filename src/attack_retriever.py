@@ -21,19 +21,13 @@ else:
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ATTACK_CACHE_PATH = PROJECT_ROOT / "data" / "attack_techniques.json"
 ALERTS_PATH = PROJECT_ROOT / "data" / "alerts.csv"
-ALERT_SEARCH_FIELDS = (
-    "alert_id",
-    "alert_name",
-    "event_id",
-    "source",
-    "host",
-    "user",
-    "process",
-    "command",
-    "severity",
-    "description",
-    "detection_logic",
-)
+ALERT_FIELD_WEIGHTS = {
+    "alert_name": 3,
+    "description": 3,
+    "command": 2,
+    "process": 2,
+    "detection_logic": 1,
+}
 TECHNIQUE_SEARCH_FIELDS = (
     "technique_id",
     "name",
@@ -111,7 +105,50 @@ def load_attack_techniques(cache_path: Path = ATTACK_CACHE_PATH) -> List[Dict[st
 
 def alert_to_search_text(alert: Dict[str, Any]) -> str:
     """Convert an alert dictionary into searchable text."""
-    return " ".join(_stringify(alert.get(field, "")) for field in ALERT_SEARCH_FIELDS)
+    text_blocks = []
+
+    for field, weight in ALERT_FIELD_WEIGHTS.items():
+        block = _stringify(alert.get(field, ""))
+        if block:
+            text_blocks.extend([block] * weight)
+
+    return expand_security_terms(" ".join(text_blocks))
+
+
+def expand_security_terms(text: str) -> str:
+    """Append generic security terms that improve lexical retrieval."""
+    expanded_terms = []
+    normalized_text = text.lower()
+
+    authentication_failure_phrases = (
+        "failed logon",
+        "failed login",
+        "failed authentication",
+        "failed interactive logon",
+        "excessive failed logon",
+    )
+    if any(phrase in normalized_text for phrase in authentication_failure_phrases):
+        expanded_terms.append(
+            "authentication failure password guessing brute force credential access "
+            "password attack"
+        )
+
+    password_spray_phrases = ("password spray", "password spraying")
+    if any(phrase in normalized_text for phrase in password_spray_phrases):
+        expanded_terms.append(
+            "password spraying credential access authentication attempts"
+        )
+
+    powershell_phrases = ("encodedcommand", "encoded command", "powershell")
+    if any(phrase in normalized_text for phrase in powershell_phrases):
+        expanded_terms.append(
+            "powershell command execution scripting interpreter execution"
+        )
+
+    if not expanded_terms:
+        return text
+
+    return " ".join([text, *expanded_terms])
 
 
 def technique_to_search_text(technique: Dict[str, Any]) -> str:
@@ -143,29 +180,52 @@ def _as_list(value: Any) -> List[Any]:
 
 def main() -> int:
     try:
-        alert = load_first_alert(ALERTS_PATH)
-        results = retrieve_attack_techniques(alert, top_k=5)
+        alerts = load_alerts(ALERTS_PATH, limit=3)
+        for alert in alerts:
+            results = retrieve_attack_techniques(alert, top_k=5)
+            print_retrieval_report(alert, results)
     except (FileNotFoundError, RuntimeError, ValueError, OSError) as exc:
         print(exc)
         return 1
 
-    print(json.dumps(results, indent=2))
     return 0
 
 
-def load_first_alert(alerts_path: Path = ALERTS_PATH) -> Dict[str, Any]:
-    """Load the first alert row from the local alerts CSV."""
+def load_alerts(alerts_path: Path = ALERTS_PATH, limit: int = 3) -> List[Dict[str, Any]]:
+    """Load alert rows from the local alerts CSV."""
     try:
         with alerts_path.open("r", newline="", encoding="utf-8") as file:
             reader = csv.DictReader(file)
-            first_alert = next(reader, None)
+            alerts = [dict(row) for _, row in zip(range(limit), reader)]
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"Alerts file not found: {alerts_path}") from exc
 
-    if first_alert is None:
+    if not alerts:
         raise ValueError(f"Alerts file is empty: {alerts_path}")
 
-    return dict(first_alert)
+    return alerts
+
+
+def print_retrieval_report(
+    alert: Dict[str, Any],
+    results: List[Dict[str, Any]],
+) -> None:
+    """Print a compact retrieval report for one alert."""
+    print(f"alert_id: {alert.get('alert_id', '')}")
+    print(f"alert_name: {alert.get('alert_name', '')}")
+    print(f"expected_technique_id: {alert.get('expected_technique_id', '')}")
+    print(f"expected_technique_name: {alert.get('expected_technique_name', '')}")
+    print("top_5_candidates:")
+
+    for candidate in results:
+        print(
+            "  - "
+            f"{candidate.get('technique_id', '')} | "
+            f"{candidate.get('name', '')} | "
+            f"similarity_score={candidate.get('similarity_score', 0)}"
+        )
+
+    print()
 
 
 if __name__ == "__main__":
