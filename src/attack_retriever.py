@@ -64,8 +64,16 @@ def retrieve_attack_techniques(
     vectorizer = TfidfVectorizer(stop_words="english")
     matrix = vectorizer.fit_transform([alert_text, *technique_texts])
     scores = cosine_similarity(matrix[0:1], matrix[1:]).flatten()
+    hybrid_scores = [
+        calculate_hybrid_score(alert_text, technique, float(scores[index]))
+        for index, technique in enumerate(techniques)
+    ]
 
-    ranked_indexes = scores.argsort()[::-1][:top_k]
+    ranked_indexes = sorted(
+        range(len(hybrid_scores)),
+        key=lambda index: hybrid_scores[index],
+        reverse=True,
+    )[:top_k]
     results = []
 
     for index in ranked_indexes:
@@ -78,6 +86,7 @@ def retrieve_attack_techniques(
                 "tactics": _as_list(technique.get("tactics", [])),
                 "platforms": _as_list(technique.get("platforms", [])),
                 "similarity_score": round(float(scores[index]), 6),
+                "hybrid_score": round(float(hybrid_scores[index]), 6),
             }
         )
 
@@ -158,6 +167,59 @@ def technique_to_search_text(technique: Dict[str, Any]) -> str:
     )
 
 
+def calculate_hybrid_score(
+    alert_text: str,
+    technique: dict,
+    tfidf_score: float,
+) -> float:
+    """Blend TF-IDF similarity with generic security relevance bonuses."""
+    hybrid_score = tfidf_score
+    normalized_alert_text = alert_text.lower()
+    normalized_technique_text = technique_to_search_text(technique).lower()
+    normalized_tactics = {
+        _stringify(tactic).lower() for tactic in _as_list(technique.get("tactics", []))
+    }
+
+    if _has_any_term(
+        normalized_alert_text,
+        ("failed", "failure", "login", "logon", "authentication", "password"),
+    ) and _has_any_term(
+        normalized_technique_text,
+        ("password", "guessing", "spraying", "brute force", "credential"),
+    ):
+        hybrid_score += 0.20
+
+    if _has_any_term(
+        normalized_alert_text,
+        ("failed", "failure", "login", "logon", "authentication", "password"),
+    ) and "credential-access" in normalized_tactics:
+        hybrid_score += 0.15
+
+    if _has_any_term(
+        normalized_alert_text,
+        ("persist", "persistence", "startup", "autorun", "run key", "service"),
+    ) and "persistence" in normalized_tactics:
+        hybrid_score += 0.15
+
+    if _has_any_term(
+        normalized_alert_text,
+        ("discover", "discovery", "enumerat", "ipconfig", "whoami", "net view"),
+    ) and "discovery" in normalized_tactics:
+        hybrid_score += 0.15
+
+    if _has_any_term(
+        normalized_alert_text,
+        ("execute", "execution", "command", "powershell", "cmd.exe", "script"),
+    ) and "execution" in normalized_tactics:
+        hybrid_score += 0.15
+
+    return hybrid_score
+
+
+def _has_any_term(text: str, terms: tuple[str, ...]) -> bool:
+    return any(term in text for term in terms)
+
+
 def _stringify(value: Any) -> str:
     if value is None:
         return ""
@@ -222,7 +284,8 @@ def print_retrieval_report(
             "  - "
             f"{candidate.get('technique_id', '')} | "
             f"{candidate.get('name', '')} | "
-            f"similarity_score={candidate.get('similarity_score', 0)}"
+            f"similarity_score={candidate.get('similarity_score', 0)} | "
+            f"hybrid_score={candidate.get('hybrid_score', 0)}"
         )
 
     print()

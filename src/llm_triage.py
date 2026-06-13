@@ -91,6 +91,14 @@ def _build_prompt(
         "Use ONLY the candidate ATT&CK techniques provided below. "
         "Do not invent technique IDs or technique names. "
         "If none of the candidates fit, return 'unknown'.\n\n"
+        "Compare the observed alert behavior against each candidate technique. "
+        "Prefer the technique that directly describes the observed behavior in the alert. "
+        "Do not choose persistence or credential theft techniques unless the alert explicitly "
+        "shows persistence setup or credential capture. "
+        "If the alert is about PowerShell execution, prefer PowerShell execution techniques "
+        "over PowerShell persistence techniques. "
+        "If the alert is about failed logon attempts, prefer password attack techniques over "
+        "logon script or credential capture techniques.\n\n"
         "Return only valid JSON with exactly these keys:\n"
         '- "priority": one of "critical", "high", "medium", "low"\n'
         '- "mitre_attack_technique": the most relevant MITRE ATT&CK technique ID '

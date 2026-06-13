@@ -1,4 +1,4 @@
 alert_id,alert_name,expected_technique_id,expected_technique_name,predicted_technique_id,predicted_raw_value,is_correct,priority,confidence
-1,Suspicious PowerShell Script Block Execution,T1059.001,PowerShell,T1546.013,"{'technique_id': 'T1546.013', 'name': 'PowerShell Profile'}",False,critical,high
-2,Excessive Failed Logon Attempts,T1110.001,Password Guessing,T1037.001,"{'id': 'T1037.001', 'name': 'Logon Script (Windows)'}",False,high,high
-3,Distributed Password Spray Against Domain Accounts,T1110.003,Password Spraying,T1110.003,"{'technique_id': 'T1110.003', 'name': 'Password Spraying'}",True,critical,high
+1,Suspicious PowerShell Script Block Execution,T1059.001,PowerShell,T1059.001,"{'technique_id': 'T1059.001', 'name': 'PowerShell'}",True,critical,high
+2,Excessive Failed Logon Attempts,T1110.001,Password Guessing,T1110.001,T1110.001,True,high,high
+3,Distributed Password Spray Against Domain Accounts,T1110.003,Password Spraying,T1110.003,T1110.003,True,critical,high
