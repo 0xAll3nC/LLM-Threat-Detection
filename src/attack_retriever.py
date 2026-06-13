@@ -4,18 +4,17 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List
 
 try:
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.metrics.pairwise import cosine_similarity
+    from rank_bm25 import BM25Okapi
 except ModuleNotFoundError as exc:
-    TfidfVectorizer = None
-    cosine_similarity = None
-    SKLEARN_IMPORT_ERROR = exc
+    BM25Okapi = None
+    BM25_IMPORT_ERROR = exc
 else:
-    SKLEARN_IMPORT_ERROR = None
+    BM25_IMPORT_ERROR = None
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +34,13 @@ TECHNIQUE_SEARCH_FIELDS = (
     "tactics",
     "platforms",
 )
+FIELD_SCORE_WEIGHTS = {
+    "name": 3.0,
+    "tactics": 2.0,
+    "description": 1.0,
+    "platforms": 0.5,
+}
+TOKEN_PATTERN = re.compile(r"[a-z0-9]+(?:\.[a-z0-9]+)?")
 
 
 def retrieve_attack_techniques(
@@ -47,11 +53,11 @@ def retrieve_attack_techniques(
         raise ValueError("Alert must be a dictionary.")
     if top_k < 1:
         raise ValueError("top_k must be at least 1.")
-    if TfidfVectorizer is None or cosine_similarity is None:
-        missing = getattr(SKLEARN_IMPORT_ERROR, "name", "scikit-learn")
+    if BM25Okapi is None:
+        missing = getattr(BM25_IMPORT_ERROR, "name", "rank-bm25")
         raise RuntimeError(
             f"Missing dependency: {missing}. "
-            "Install it with `python3 -m pip install scikit-learn`."
+            "Install it with `python3 -m pip install rank-bm25`."
         )
 
     techniques = load_attack_techniques(cache_path)
@@ -59,19 +65,13 @@ def retrieve_attack_techniques(
         return []
 
     alert_text = alert_to_search_text(alert)
-    technique_texts = [technique_to_search_text(technique) for technique in techniques]
+    query_tokens = tokenize_text(alert_text)
 
-    vectorizer = TfidfVectorizer(stop_words="english")
-    matrix = vectorizer.fit_transform([alert_text, *technique_texts])
-    scores = cosine_similarity(matrix[0:1], matrix[1:]).flatten()
-    hybrid_scores = [
-        calculate_hybrid_score(alert_text, technique, float(scores[index]))
-        for index, technique in enumerate(techniques)
-    ]
+    scores = calculate_field_weighted_scores(techniques, query_tokens)
 
     ranked_indexes = sorted(
-        range(len(hybrid_scores)),
-        key=lambda index: hybrid_scores[index],
+        range(len(scores)),
+        key=lambda index: scores[index],
         reverse=True,
     )[:top_k]
     results = []
@@ -86,7 +86,7 @@ def retrieve_attack_techniques(
                 "tactics": _as_list(technique.get("tactics", [])),
                 "platforms": _as_list(technique.get("platforms", [])),
                 "similarity_score": round(float(scores[index]), 6),
-                "hybrid_score": round(float(hybrid_scores[index]), 6),
+                "field_weighted_score": round(float(scores[index]), 6),
             }
         )
 
@@ -121,43 +121,12 @@ def alert_to_search_text(alert: Dict[str, Any]) -> str:
         if block:
             text_blocks.extend([block] * weight)
 
-    return expand_security_terms(" ".join(text_blocks))
+    return " ".join(text_blocks)
 
 
 def expand_security_terms(text: str) -> str:
-    """Append generic security terms that improve lexical retrieval."""
-    expanded_terms = []
-    normalized_text = text.lower()
-
-    authentication_failure_phrases = (
-        "failed logon",
-        "failed login",
-        "failed authentication",
-        "failed interactive logon",
-        "excessive failed logon",
-    )
-    if any(phrase in normalized_text for phrase in authentication_failure_phrases):
-        expanded_terms.append(
-            "authentication failure password guessing brute force credential access "
-            "password attack"
-        )
-
-    password_spray_phrases = ("password spray", "password spraying")
-    if any(phrase in normalized_text for phrase in password_spray_phrases):
-        expanded_terms.append(
-            "password spraying credential access authentication attempts"
-        )
-
-    powershell_phrases = ("encodedcommand", "encoded command", "powershell")
-    if any(phrase in normalized_text for phrase in powershell_phrases):
-        expanded_terms.append(
-            "powershell command execution scripting interpreter execution"
-        )
-
-    if not expanded_terms:
-        return text
-
-    return " ".join([text, *expanded_terms])
+    """Compatibility helper: return text unchanged for baseline retrieval."""
+    return text
 
 
 def technique_to_search_text(technique: Dict[str, Any]) -> str:
@@ -172,52 +141,42 @@ def calculate_hybrid_score(
     technique: dict,
     tfidf_score: float,
 ) -> float:
-    """Blend TF-IDF similarity with generic security relevance bonuses."""
-    hybrid_score = tfidf_score
-    normalized_alert_text = alert_text.lower()
-    normalized_technique_text = technique_to_search_text(technique).lower()
-    normalized_tactics = {
-        _stringify(tactic).lower() for tactic in _as_list(technique.get("tactics", []))
-    }
-
-    if _has_any_term(
-        normalized_alert_text,
-        ("failed", "failure", "login", "logon", "authentication", "password"),
-    ) and _has_any_term(
-        normalized_technique_text,
-        ("password", "guessing", "spraying", "brute force", "credential"),
-    ):
-        hybrid_score += 0.20
-
-    if _has_any_term(
-        normalized_alert_text,
-        ("failed", "failure", "login", "logon", "authentication", "password"),
-    ) and "credential-access" in normalized_tactics:
-        hybrid_score += 0.15
-
-    if _has_any_term(
-        normalized_alert_text,
-        ("persist", "persistence", "startup", "autorun", "run key", "service"),
-    ) and "persistence" in normalized_tactics:
-        hybrid_score += 0.15
-
-    if _has_any_term(
-        normalized_alert_text,
-        ("discover", "discovery", "enumerat", "ipconfig", "whoami", "net view"),
-    ) and "discovery" in normalized_tactics:
-        hybrid_score += 0.15
-
-    if _has_any_term(
-        normalized_alert_text,
-        ("execute", "execution", "command", "powershell", "cmd.exe", "script"),
-    ) and "execution" in normalized_tactics:
-        hybrid_score += 0.15
-
-    return hybrid_score
+    """Compatibility helper: return the original TF-IDF score unchanged."""
+    return tfidf_score
 
 
-def _has_any_term(text: str, terms: tuple[str, ...]) -> bool:
-    return any(term in text for term in terms)
+def calculate_field_weighted_scores(
+    techniques: List[Dict[str, Any]],
+    query_tokens: List[str],
+) -> List[float]:
+    """Calculate weighted BM25 scores across individual ATT&CK fields."""
+    scores = [0.0] * len(techniques)
+
+    for field, weight in FIELD_SCORE_WEIGHTS.items():
+        field_texts = [technique_field_text(technique, field) for technique in techniques]
+        field_scores = bm25_field_scores(field_texts, query_tokens)
+
+        for index, score in enumerate(field_scores):
+            scores[index] += weight * float(score)
+
+    return scores
+
+
+def bm25_field_scores(field_texts: List[str], query_tokens: List[str]):
+    """Score one ATT&CK field across all techniques with BM25."""
+    tokenized_corpus = [tokenize_text(text) for text in field_texts]
+    bm25 = BM25Okapi(tokenized_corpus)
+    return bm25.get_scores(query_tokens)
+
+
+def technique_field_text(technique: Dict[str, Any], field: str) -> str:
+    """Convert one technique field into searchable text."""
+    return _stringify(technique.get(field, ""))
+
+
+def tokenize_text(text: str) -> List[str]:
+    """Tokenize text with a simple lowercase regex tokenizer."""
+    return TOKEN_PATTERN.findall(_stringify(text).lower())
 
 
 def _stringify(value: Any) -> str:
@@ -285,7 +244,7 @@ def print_retrieval_report(
             f"{candidate.get('technique_id', '')} | "
             f"{candidate.get('name', '')} | "
             f"similarity_score={candidate.get('similarity_score', 0)} | "
-            f"hybrid_score={candidate.get('hybrid_score', 0)}"
+            f"field_weighted_score={candidate.get('field_weighted_score', 0)}"
         )
 
     print()
