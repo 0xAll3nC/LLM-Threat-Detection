@@ -16,10 +16,21 @@ except ModuleNotFoundError as exc:
 else:
     BM25_IMPORT_ERROR = None
 
+try:
+    from sentence_transformers import SentenceTransformer
+    from sklearn.metrics.pairwise import cosine_similarity
+except Exception as exc:
+    SentenceTransformer = None
+    cosine_similarity = None
+    DENSE_IMPORT_ERROR = exc
+else:
+    DENSE_IMPORT_ERROR = None
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ATTACK_CACHE_PATH = PROJECT_ROOT / "data" / "attack_techniques.json"
 ALERTS_PATH = PROJECT_ROOT / "data" / "alerts.csv"
+EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 ALERT_FIELD_WEIGHTS = {
     "alert_name": 3,
     "description": 3,
@@ -41,6 +52,9 @@ FIELD_SCORE_WEIGHTS = {
     "platforms": 0.5,
 }
 TOKEN_PATTERN = re.compile(r"[a-z0-9]+(?:\.[a-z0-9]+)?")
+_EMBEDDING_MODEL = None
+_DENSE_TECHNIQUES = None
+_DENSE_TECHNIQUE_EMBEDDINGS = None
 
 
 def retrieve_attack_techniques(
@@ -93,6 +107,54 @@ def retrieve_attack_techniques(
     return results
 
 
+def retrieve_attack_techniques_dense(alert: dict, top_k: int = 10) -> list[dict]:
+    """Return the top matching ATT&CK techniques using dense embeddings."""
+    if not isinstance(alert, dict):
+        raise ValueError("Alert must be a dictionary.")
+    if top_k < 1:
+        raise ValueError("top_k must be at least 1.")
+    if SentenceTransformer is None or cosine_similarity is None:
+        raise RuntimeError(
+            "Dense retrieval dependencies are unavailable. "
+            f"Install/fix sentence-transformers and scikit-learn. Error: {DENSE_IMPORT_ERROR}"
+        )
+
+    techniques, technique_embeddings = get_dense_technique_index()
+    if not techniques:
+        return []
+
+    alert_text = alert_to_search_text(alert)
+    model = get_embedding_model()
+    alert_embedding = model.encode(
+        [alert_text],
+        convert_to_numpy=True,
+        show_progress_bar=False,
+    )
+    scores = cosine_similarity(alert_embedding, technique_embeddings).flatten()
+
+    ranked_indexes = sorted(
+        range(len(scores)),
+        key=lambda index: scores[index],
+        reverse=True,
+    )[:top_k]
+    results = []
+
+    for index in ranked_indexes:
+        technique = techniques[int(index)]
+        results.append(
+            {
+                "technique_id": technique.get("technique_id", ""),
+                "name": technique.get("name", ""),
+                "description": technique.get("description", ""),
+                "tactics": _as_list(technique.get("tactics", [])),
+                "platforms": _as_list(technique.get("platforms", [])),
+                "dense_score": round(float(scores[index]), 6),
+            }
+        )
+
+    return results
+
+
 def load_attack_techniques(cache_path: Path = ATTACK_CACHE_PATH) -> List[Dict[str, Any]]:
     """Load the local ATT&CK technique cache."""
     try:
@@ -133,6 +195,19 @@ def technique_to_search_text(technique: Dict[str, Any]) -> str:
     """Convert a technique dictionary into searchable text."""
     return " ".join(
         _stringify(technique.get(field, "")) for field in TECHNIQUE_SEARCH_FIELDS
+    )
+
+
+def dense_technique_to_search_text(technique: Dict[str, Any]) -> str:
+    """Convert a technique dictionary into dense retrieval text."""
+    return " ".join(
+        [
+            _stringify(technique.get("technique_id", "")),
+            _stringify(technique.get("name", "")),
+            _stringify(technique.get("tactics", [])),
+            _stringify(technique.get("platforms", [])),
+            _stringify(technique.get("description", "")),
+        ]
     )
 
 
@@ -179,6 +254,31 @@ def tokenize_text(text: str) -> List[str]:
     return TOKEN_PATTERN.findall(_stringify(text).lower())
 
 
+def get_embedding_model():
+    """Load the dense embedding model once per process."""
+    global _EMBEDDING_MODEL
+    if _EMBEDDING_MODEL is None:
+        _EMBEDDING_MODEL = SentenceTransformer(EMBEDDING_MODEL_NAME)
+    return _EMBEDDING_MODEL
+
+
+def get_dense_technique_index():
+    """Load ATT&CK techniques and dense embeddings once per process."""
+    global _DENSE_TECHNIQUES, _DENSE_TECHNIQUE_EMBEDDINGS
+    if _DENSE_TECHNIQUES is None or _DENSE_TECHNIQUE_EMBEDDINGS is None:
+        _DENSE_TECHNIQUES = load_attack_techniques(ATTACK_CACHE_PATH)
+        technique_texts = [
+            dense_technique_to_search_text(technique)
+            for technique in _DENSE_TECHNIQUES
+        ]
+        _DENSE_TECHNIQUE_EMBEDDINGS = get_embedding_model().encode(
+            technique_texts,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        )
+    return _DENSE_TECHNIQUES, _DENSE_TECHNIQUE_EMBEDDINGS
+
+
 def _stringify(value: Any) -> str:
     if value is None:
         return ""
@@ -205,6 +305,7 @@ def main() -> int:
         for alert in alerts:
             results = retrieve_attack_techniques(alert, top_k=5)
             print_retrieval_report(alert, results)
+            print_dense_retrieval_report(alert)
     except (FileNotFoundError, RuntimeError, ValueError, OSError) as exc:
         print(exc)
         return 1
@@ -245,6 +346,28 @@ def print_retrieval_report(
             f"{candidate.get('name', '')} | "
             f"similarity_score={candidate.get('similarity_score', 0)} | "
             f"field_weighted_score={candidate.get('field_weighted_score', 0)}"
+        )
+
+    print()
+
+
+def print_dense_retrieval_report(alert: Dict[str, Any]) -> None:
+    """Print dense retrieval results for one alert, if available."""
+    print("dense_top_5_candidates:")
+
+    try:
+        results = retrieve_attack_techniques_dense(alert, top_k=5)
+    except Exception as exc:
+        print(f"  dense retrieval unavailable: {exc}")
+        print()
+        return
+
+    for candidate in results:
+        print(
+            "  - "
+            f"{candidate.get('technique_id', '')} | "
+            f"{candidate.get('name', '')} | "
+            f"dense_score={candidate.get('dense_score', 0)}"
         )
 
     print()
