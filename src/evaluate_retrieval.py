@@ -17,6 +17,7 @@ except ModuleNotFoundError:
 from attack_retriever import (
     retrieve_attack_techniques,
     retrieve_attack_techniques_dense,
+    retrieve_attack_techniques_hybrid,
 )
 
 
@@ -36,8 +37,7 @@ OUTPUT_COLUMNS = [
     "expected_technique_id",
     "bm25_rank",
     "dense_rank",
-    "bm25_hit",
-    "dense_hit",
+    "hybrid_rank",
 ]
 
 
@@ -59,6 +59,8 @@ def main() -> int:
     print_summary("BM25", calculate_metrics(evaluation_rows, "bm25_rank"))
     print()
     print_summary("Dense", calculate_metrics(evaluation_rows, "dense_rank"))
+    print()
+    print_summary("Hybrid", calculate_metrics(evaluation_rows, "hybrid_rank"))
     if dense_error:
         print(f"Dense retrieval warning: {dense_error}")
     print(f"Saved retrieval evaluation results to {OUTPUT_PATH}")
@@ -111,6 +113,11 @@ def evaluate_retrieval(alerts) -> tuple[List[Dict[str, Any]], Optional[str]]:
             except Exception as exc:
                 dense_error = str(exc)
 
+        hybrid_rank = None
+        if dense_error is None:
+            hybrid_results = retrieve_attack_techniques_hybrid(alert, top_k=10)
+            hybrid_rank = find_rank(expected_id, technique_ids(hybrid_results))
+
         evaluation_rows.append(
             {
                 "alert_id": alert.get("alert_id", ""),
@@ -118,8 +125,7 @@ def evaluate_retrieval(alerts) -> tuple[List[Dict[str, Any]], Optional[str]]:
                 "expected_technique_id": expected_id,
                 "bm25_rank": bm25_rank if bm25_rank is not None else "",
                 "dense_rank": dense_rank if dense_rank is not None else "",
-                "bm25_hit": is_hit_at_k(bm25_rank, 10),
-                "dense_hit": is_hit_at_k(dense_rank, 10),
+                "hybrid_rank": hybrid_rank if hybrid_rank is not None else "",
             }
         )
 

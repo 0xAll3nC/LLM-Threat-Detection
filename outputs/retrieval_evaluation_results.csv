@@ -1,21 +1,21 @@
-alert_id,alert_name,expected_technique_id,bm25_rank,dense_rank,bm25_hit,dense_hit
-1,Suspicious PowerShell Script Block Execution,T1059.001,2,1,True,True
-2,Excessive Failed Logon Attempts,T1110.001,8,,True,False
-3,Distributed Password Spray Against Domain Accounts,T1110.003,1,1,True,True
-4,New Local Administrator Account Created,T1136.001,1,1,True,True
-5,Scheduled Task Created From Command Line,T1053.005,1,1,True,True
-6,New Service Installed With Suspicious Binary Path,T1543.003,3,4,True,True
-7,Network Discovery Commands Executed,T1016,3,3,True,True
-8,User Discovery Via Net Command,T1087.002,3,1,True,True
-9,Domain Group Enumeration,T1069.002,2,2,True,True
-10,Credential Dumping Tool Detected,T1003,1,3,True,True
-11,LSASS Process Access From Non-System Process,T1003.001,1,1,True,True
-12,Encoded PowerShell Command Execution,T1059.001,2,4,True,True
-13,RDP Login From Unusual Source,T1021.001,8,2,True,True
-14,WMI Remote Process Execution,T1047,2,1,True,True
-15,Registry Run Key Persistence Added,T1547.001,1,1,True,True
-16,SMB Lateral Movement Tooling,T1021.002,1,5,True,True
-17,DNS Tunneling Volume Anomaly,T1071.004,1,5,True,True
-18,Periodic Beaconing To External Host,T1071.001,,,False,False
-19,Suspicious Office Child Process,T1204.002,,,False,False
-20,Privilege Escalation Attempt Via AlwaysInstallElevated,T1218.007,10,7,True,True
+alert_id,alert_name,expected_technique_id,bm25_rank,dense_rank,hybrid_rank
+1,Suspicious PowerShell Script Block Execution,T1059.001,2,1,2
+2,Excessive Failed Logon Attempts,T1110.001,8,,
+3,Distributed Password Spray Against Domain Accounts,T1110.003,1,1,1
+4,New Local Administrator Account Created,T1136.001,1,1,1
+5,Scheduled Task Created From Command Line,T1053.005,1,1,1
+6,New Service Installed With Suspicious Binary Path,T1543.003,3,4,3
+7,Network Discovery Commands Executed,T1016,3,3,1
+8,User Discovery Via Net Command,T1087.002,3,1,1
+9,Domain Group Enumeration,T1069.002,2,2,2
+10,Credential Dumping Tool Detected,T1003,1,3,1
+11,LSASS Process Access From Non-System Process,T1003.001,1,1,1
+12,Encoded PowerShell Command Execution,T1059.001,2,4,1
+13,RDP Login From Unusual Source,T1021.001,8,2,2
+14,WMI Remote Process Execution,T1047,2,1,1
+15,Registry Run Key Persistence Added,T1547.001,1,1,1
+16,SMB Lateral Movement Tooling,T1021.002,1,5,1
+17,DNS Tunneling Volume Anomaly,T1071.004,1,5,2
+18,Periodic Beaconing To External Host,T1071.001,,,
+19,Suspicious Office Child Process,T1204.002,,,
+20,Privilege Escalation Attempt Via AlwaysInstallElevated,T1218.007,10,7,3

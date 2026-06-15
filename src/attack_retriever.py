@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List
+
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 try:
     from rank_bm25 import BM25Okapi
@@ -52,6 +56,7 @@ FIELD_SCORE_WEIGHTS = {
     "platforms": 0.5,
 }
 TOKEN_PATTERN = re.compile(r"[a-z0-9]+(?:\.[a-z0-9]+)?")
+RRF_K = 60
 _EMBEDDING_MODEL = None
 _DENSE_TECHNIQUES = None
 _DENSE_TECHNIQUE_EMBEDDINGS = None
@@ -155,6 +160,76 @@ def retrieve_attack_techniques_dense(alert: dict, top_k: int = 10) -> list[dict]
     return results
 
 
+def retrieve_attack_techniques_hybrid(alert: dict, top_k: int = 10) -> list[dict]:
+    """Return top ATT&CK techniques using reciprocal rank fusion."""
+    if not isinstance(alert, dict):
+        raise ValueError("Alert must be a dictionary.")
+    if top_k < 1:
+        raise ValueError("top_k must be at least 1.")
+
+    bm25_results = retrieve_attack_techniques(alert, top_k=10)
+    dense_results = retrieve_attack_techniques_dense(alert, top_k=10)
+    fused = {}
+
+    add_rrf_results(fused, bm25_results, "bm25_rank")
+    add_rrf_results(fused, dense_results, "dense_rank")
+
+    ranked = sorted(
+        fused.values(),
+        key=lambda candidate: candidate["rrf_score"],
+        reverse=True,
+    )[:top_k]
+
+    for candidate in ranked:
+        candidate["rrf_score"] = round(float(candidate["rrf_score"]), 6)
+
+    return ranked
+
+
+def rerank_attack_candidates(
+    alert: dict,
+    candidates: list[dict],
+    top_k: int = 5,
+) -> list[dict]:
+    """Rerank already-retrieved ATT&CK candidates with dense similarity."""
+    if not isinstance(alert, dict):
+        raise ValueError("Alert must be a dictionary.")
+    if not isinstance(candidates, list):
+        raise ValueError("Candidates must be a list.")
+    if top_k < 1:
+        raise ValueError("top_k must be at least 1.")
+    if SentenceTransformer is None or cosine_similarity is None:
+        raise RuntimeError(
+            "Dense reranking dependencies are unavailable. "
+            f"Install/fix sentence-transformers and scikit-learn. Error: {DENSE_IMPORT_ERROR}"
+        )
+    if not candidates:
+        return []
+
+    alert_text = alert_to_search_text(alert)
+    candidate_texts = [
+        dense_technique_to_search_text(candidate) for candidate in candidates
+    ]
+    embeddings = get_embedding_model().encode(
+        [alert_text, *candidate_texts],
+        convert_to_numpy=True,
+        show_progress_bar=False,
+    )
+    scores = cosine_similarity(embeddings[0:1], embeddings[1:]).flatten()
+    scored_candidates = []
+
+    for index, candidate in enumerate(candidates):
+        scored_candidate = candidate.copy()
+        scored_candidate["rerank_score"] = round(float(scores[index]), 6)
+        scored_candidates.append(scored_candidate)
+
+    return sorted(
+        scored_candidates,
+        key=lambda candidate: candidate["rerank_score"],
+        reverse=True,
+    )[:top_k]
+
+
 def load_attack_techniques(cache_path: Path = ATTACK_CACHE_PATH) -> List[Dict[str, Any]]:
     """Load the local ATT&CK technique cache."""
     try:
@@ -218,6 +293,34 @@ def calculate_hybrid_score(
 ) -> float:
     """Compatibility helper: return the original TF-IDF score unchanged."""
     return tfidf_score
+
+
+def add_rrf_results(
+    fused: Dict[str, Dict[str, Any]],
+    results: List[Dict[str, Any]],
+    rank_field: str,
+) -> None:
+    """Merge ranked retrieval results into a reciprocal-rank-fusion map."""
+    for rank, result in enumerate(results, start=1):
+        technique_id = str(result.get("technique_id", "")).strip()
+        if not technique_id:
+            continue
+
+        candidate = fused.setdefault(
+            technique_id,
+            {
+                "technique_id": technique_id,
+                "name": result.get("name", ""),
+                "description": result.get("description", ""),
+                "tactics": _as_list(result.get("tactics", [])),
+                "platforms": _as_list(result.get("platforms", [])),
+                "rrf_score": 0.0,
+                "bm25_rank": None,
+                "dense_rank": None,
+            },
+        )
+        candidate["rrf_score"] += 1 / (RRF_K + rank)
+        candidate[rank_field] = rank
 
 
 def calculate_field_weighted_scores(
@@ -306,6 +409,7 @@ def main() -> int:
             results = retrieve_attack_techniques(alert, top_k=5)
             print_retrieval_report(alert, results)
             print_dense_retrieval_report(alert)
+            print_hybrid_retrieval_report(alert)
     except (FileNotFoundError, RuntimeError, ValueError, OSError) as exc:
         print(exc)
         return 1
@@ -337,7 +441,7 @@ def print_retrieval_report(
     print(f"alert_name: {alert.get('alert_name', '')}")
     print(f"expected_technique_id: {alert.get('expected_technique_id', '')}")
     print(f"expected_technique_name: {alert.get('expected_technique_name', '')}")
-    print("top_5_candidates:")
+    print("bm25_top_5_candidates:")
 
     for candidate in results:
         print(
@@ -368,6 +472,30 @@ def print_dense_retrieval_report(alert: Dict[str, Any]) -> None:
             f"{candidate.get('technique_id', '')} | "
             f"{candidate.get('name', '')} | "
             f"dense_score={candidate.get('dense_score', 0)}"
+        )
+
+    print()
+
+
+def print_hybrid_retrieval_report(alert: Dict[str, Any]) -> None:
+    """Print hybrid retrieval results for one alert, if available."""
+    print("hybrid_top_5_candidates:")
+
+    try:
+        results = retrieve_attack_techniques_hybrid(alert, top_k=5)
+    except Exception as exc:
+        print(f"  hybrid retrieval unavailable: {exc}")
+        print()
+        return
+
+    for candidate in results:
+        print(
+            "  - "
+            f"{candidate.get('technique_id', '')} | "
+            f"{candidate.get('name', '')} | "
+            f"rrf_score={candidate.get('rrf_score', 0)} | "
+            f"bm25_rank={candidate.get('bm25_rank')} | "
+            f"dense_rank={candidate.get('dense_rank')}"
         )
 
     print()

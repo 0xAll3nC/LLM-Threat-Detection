@@ -7,7 +7,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-from attack_retriever import retrieve_attack_techniques
+from attack_retriever import (
+    rerank_attack_candidates,
+    retrieve_attack_techniques_hybrid,
+)
 
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
@@ -92,13 +95,15 @@ def _build_prompt(
         "Do not invent technique IDs or technique names. "
         "If none of the candidates fit, return 'unknown'.\n\n"
         "Compare the observed alert behavior against each candidate technique. "
-        "Prefer the technique that directly describes the observed behavior in the alert. "
-        "Do not choose persistence or credential theft techniques unless the alert explicitly "
-        "shows persistence setup or credential capture. "
-        "If the alert is about PowerShell execution, prefer PowerShell execution techniques "
-        "over PowerShell persistence techniques. "
-        "If the alert is about failed logon attempts, prefer password attack techniques over "
-        "logon script or credential capture techniques.\n\n"
+        "For each candidate technique, compare: "
+        "Does the technique directly describe the observed behavior? "
+        "Does the technique's tactic align with the alert behavior? "
+        "Does the alert contain evidence required by the technique? "
+        "Is the match based on actual behavior, not just shared keywords? "
+        "Prefer the most specific technique when multiple candidates match. "
+        "Do not choose a technique only because it shares words with the alert. "
+        "Choose the technique whose ATT&CK definition best explains the observed behavior. "
+        "Think through the comparison internally, but return only the final JSON.\n\n"
         "Return only valid JSON with exactly these keys:\n"
         '- "priority": one of "critical", "high", "medium", "low"\n'
         '- "mitre_attack_technique": the most relevant MITRE ATT&CK technique ID '
@@ -171,7 +176,8 @@ def _retrieve_attack_candidates(
     alert: Dict[str, Any],
 ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     try:
-        candidates = retrieve_attack_techniques(alert, top_k=3)
+        hybrid_candidates = retrieve_attack_techniques_hybrid(alert, top_k=10)
+        candidates = rerank_attack_candidates(alert, hybrid_candidates, top_k=5)
     except Exception as exc:
         return [], f"ATT&CK retrieval failed: {exc}"
 
