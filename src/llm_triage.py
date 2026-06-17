@@ -7,10 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-from attack_retriever import (
-    rerank_attack_candidates,
-    retrieve_attack_techniques_hybrid,
-)
+from attack_retriever import retrieve_attack_techniques_hybrid
 
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
@@ -176,8 +173,9 @@ def _retrieve_attack_candidates(
     alert: Dict[str, Any],
 ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     try:
-        hybrid_candidates = retrieve_attack_techniques_hybrid(alert, top_k=10)
-        candidates = rerank_attack_candidates(alert, hybrid_candidates, top_k=5)
+        # Reranking was evaluated in Phase 3.5 and disabled in the main pipeline
+        # because it reduced retrieval metrics compared to Hybrid retrieval.
+        candidates = retrieve_attack_techniques_hybrid(alert, top_k=5)
     except Exception as exc:
         return [], f"ATT&CK retrieval failed: {exc}"
 
