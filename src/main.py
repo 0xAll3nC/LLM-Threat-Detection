@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 from typing import Any, Dict
 
@@ -22,11 +23,13 @@ else:
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 INPUT_PATH = PROJECT_ROOT / "data" / "alerts.csv"
 OUTPUT_PATH = PROJECT_ROOT / "outputs" / "prioritized_alerts.csv"
-MAX_ALERTS = 3
+DEFAULT_ALERT_LIMIT = None
 
 
 def main() -> int:
     """Read alerts, enrich them with LLM triage, and write prioritized results."""
+    args = _parse_args()
+
     if pd is None:
         print("Missing dependency: pandas. Install it with `pip install pandas`.")
         return 1
@@ -50,8 +53,8 @@ def main() -> int:
         print(f"Could not read input CSV: {exc}")
         return 1
 
-    if MAX_ALERTS is not None:
-        alerts = alerts.head(MAX_ALERTS)
+    if args.limit is not None:
+        alerts = alerts.head(args.limit)
 
     prioritized_alerts = []
 
@@ -71,6 +74,29 @@ def main() -> int:
 
     print(f"Saved prioritized alerts to {OUTPUT_PATH}")
     return 0
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run SOC alert triage.")
+    parser.add_argument(
+        "--limit",
+        type=_positive_int,
+        default=DEFAULT_ALERT_LIMIT,
+        help="Optionally process only the first N alerts for debugging.",
+    )
+    return parser.parse_args()
+
+
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--limit must be a positive integer.") from exc
+
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("--limit must be a positive integer.")
+
+    return parsed
 
 
 def _triage_with_error_handling(alert: Dict[str, Any]) -> Dict[str, Any]:
