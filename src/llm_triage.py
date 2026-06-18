@@ -21,6 +21,14 @@ EXPECTED_FIELDS = {
     "explanation": "",
     "recommended_action": "",
 }
+ALERT_PROMPT_FIELDS = (
+    "alert_name",
+    "severity",
+    "description",
+    "command",
+    "process",
+    "detection_logic",
+)
 
 
 def triage_alert(alert: Dict[str, Any]) -> Dict[str, Any]:
@@ -78,7 +86,12 @@ def _build_prompt(
     alert: Dict[str, Any],
     candidate_techniques: List[Dict[str, Any]],
 ) -> str:
-    alert_json = json.dumps(alert, indent=2, sort_keys=True, default=str)
+    alert_json = json.dumps(
+        _prompt_alert_evidence(alert),
+        indent=2,
+        sort_keys=True,
+        default=str,
+    )
     candidates_json = json.dumps(
         _prompt_candidate_techniques(candidate_techniques),
         indent=2,
@@ -86,30 +99,47 @@ def _build_prompt(
         default=str,
     )
     return (
-        "You are an experienced Security Operations Center (SOC) analyst. "
-        "Triage the following security alert.\n\n"
-        "Use ONLY the candidate ATT&CK techniques provided below. "
-        "Do not invent technique IDs or technique names. "
-        "If none of the candidates fit, return 'unknown'.\n\n"
-        "Compare the observed alert behavior against each candidate technique. "
-        "For each candidate technique, compare: "
-        "Does the technique directly describe the observed behavior? "
-        "Does the technique's tactic align with the alert behavior? "
-        "Does the alert contain evidence required by the technique? "
-        "Is the match based on actual behavior, not just shared keywords? "
-        "Prefer the most specific technique when multiple candidates match. "
-        "Do not choose a technique only because it shares words with the alert. "
-        "Choose the technique whose ATT&CK definition best explains the observed behavior. "
-        "Think through the comparison internally, but return only the final JSON.\n\n"
-        "Return only valid JSON with exactly these keys:\n"
+        "You are an experienced Security Operations Center (SOC) analyst performing "
+        "alert triage and ATT&CK technique selection.\n\n"
+        "ATT&CK selection constraints:\n"
+        "1. The candidate list is a closed set. Choose exactly one technique from it, "
+        "or choose \"unknown\" if no candidate is supported by the alert evidence.\n"
+        "2. Use ONLY a candidate technique_id and name shown below. Copy both exactly. "
+        "Do not invent, modify, or combine ATT&CK IDs or technique names.\n"
+        "3. Candidate order and similarity_score are retrieval hints, not proof that a "
+        "candidate is correct.\n"
+        "4. Choose the candidate that most directly explains the behavior observed in "
+        "the alert evidence.\n"
+        "5. Do not choose a related, broader, higher-risk, or adjacent technique unless "
+        "the alert evidence explicitly supports that technique's defining behavior.\n"
+        "6. Base technique selection on observed behavior, not severity, broad thematic "
+        "similarity, candidate rank, or shared terminology.\n\n"
+        "Candidate comparison rubric:\n"
+        "Evaluate every candidate internally using the following evidence:\n"
+        "- Compare the alert description with the candidate description_summary.\n"
+        "- Compare the command and process with the behavior required by the candidate.\n"
+        "- Compare the detection_logic with the candidate's defining behavior.\n"
+        "- Confirm that the candidate tactics align with the observed activity.\n"
+        "- Confirm that the candidate platforms are compatible with the alert context.\n"
+        "- Reject candidates that require behavior not shown by the alert.\n"
+        "- Prefer a directly evidenced behavior over a broader category, related "
+        "mechanism, possible consequence, or adjacent behavior.\n"
+        "- When multiple candidates are plausible, prefer the most specific candidate "
+        "directly supported by the strongest observed evidence.\n\n"
+        "Determine priority separately from ATT&CK selection. A technique should not be "
+        "chosen simply because it appears more severe.\n\n"
+        "Perform the comparison internally. Do not reveal chain-of-thought, candidate "
+        "scoring, or intermediate analysis. Return only the final valid JSON object.\n\n"
+        "Output schema. Return exactly these keys:\n"
         '- "priority": one of "critical", "high", "medium", "low"\n'
-        '- "mitre_attack_technique": the most relevant MITRE ATT&CK technique ID '
-        'and name, or "unknown"\n'
+        '- "mitre_attack_technique": a string formatted as '
+        '"<candidate technique_id> - <candidate name>", or "unknown"\n'
         '- "confidence": one of "high", "medium", "low"\n'
-        '- "explanation": a concise analyst explanation\n'
+        '- "explanation": one or two concise analyst-facing sentences identifying the '
+        "observed evidence that supports the selected candidate\n"
         '- "recommended_action": the next action a SOC analyst should take\n\n'
-        f"Candidate ATT&CK techniques:\n{candidates_json}\n\n"
-        f"Alert:\n{alert_json}"
+        f"Retrieved ATT&CK candidates:\n{candidates_json}\n\n"
+        f"Alert evidence:\n{alert_json}"
     )
 
 
@@ -202,6 +232,10 @@ def _prompt_candidate_techniques(
         )
 
     return prompt_candidates
+
+
+def _prompt_alert_evidence(alert: Dict[str, Any]) -> Dict[str, Any]:
+    return {field: alert.get(field, "") for field in ALERT_PROMPT_FIELDS}
 
 
 def _description_summary(description: Any) -> str:

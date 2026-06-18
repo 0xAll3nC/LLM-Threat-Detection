@@ -1,5 +1,5 @@
 failure_type,count,percentage
-correct,10,50.0
-llm_selection_error,7,35.0
+correct,12,60.0
+llm_selection_error,5,25.0
 retrieval_miss,3,15.0
 parse_or_output_error,0,0.0
