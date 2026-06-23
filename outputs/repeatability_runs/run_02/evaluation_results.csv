@@ -1,0 +1,21 @@
+alert_id,alert_name,expected_technique_id,expected_technique_name,predicted_technique_id,predicted_technique_name,predicted_raw_value,is_correct,expected_in_retrieved_candidates,expected_candidate_rank,failure_type,priority,confidence
+1,Suspicious PowerShell Script Block Execution,T1059.001,PowerShell,T1546.013,PowerShell Profile,T1546.013 - PowerShell Profile,False,True,2,llm_selection_error,medium,high
+2,Excessive Failed Logon Attempts,T1110.001,Password Guessing,T1110.003,Password Spraying,T1110.003 - Password Spraying,False,False,,retrieval_miss,high,high
+3,Distributed Password Spray Against Domain Accounts,T1110.003,Password Spraying,T1110.003,Password Spraying,T1110.003 - Password Spraying,True,True,1,correct,medium,medium
+4,New Local Administrator Account Created,T1136.001,Local Account,T1136.001,Local Account,T1136.001 - Local Account,True,True,1,correct,high,medium
+5,Scheduled Task Created From Command Line,T1053.005,Scheduled Task,T1053.005,Scheduled Task,T1053.005 - Scheduled Task,True,True,1,correct,medium,medium
+6,New Service Installed With Suspicious Binary Path,T1543.003,Windows Service,T1574.009,Path Interception by Unquoted Path,T1574.009 - Path Interception by Unquoted Path,False,True,3,llm_selection_error,medium,medium
+7,Network Discovery Commands Executed,T1016,System Network Configuration Discovery,T1016,System Network Configuration Discovery,T1016 - System Network Configuration Discovery,True,True,1,correct,high,high
+8,User Discovery Via Net Command,T1087.002,Domain Account,T1087.002,Domain Account,T1087.002 - Domain Account,True,True,1,correct,high,medium
+9,Domain Group Enumeration,T1069.002,Domain Groups,T1087.002,Domain Account,T1087.002 - Domain Account,False,True,2,llm_selection_error,high,high
+10,Credential Dumping Tool Detected,T1003,OS Credential Dumping,T1003,OS Credential Dumping,T1003 - OS Credential Dumping,True,True,1,correct,high,medium
+11,LSASS Process Access From Non-System Process,T1003.001,LSASS Memory,T1003.001,LSASS Memory,T1003.001 - LSASS Memory,True,True,1,correct,high,medium
+12,Encoded PowerShell Command Execution,T1059.001,PowerShell,T1059.001,PowerShell,T1059.001 - PowerShell,True,True,1,correct,medium,medium
+13,RDP Login From Unusual Source,T1021.001,Remote Desktop Protocol,T1021.001,Remote Desktop Protocol,T1021.001 - Remote Desktop Protocol,True,True,2,correct,high,medium
+14,WMI Remote Process Execution,T1047,Windows Management Instrumentation,T1047,Windows Management Instrumentation,T1047 - Windows Management Instrumentation,True,True,1,correct,critical,medium
+15,Registry Run Key Persistence Added,T1547.001,Registry Run Keys / Startup Folder,T1547.001,Registry Run Keys / Startup Folder,T1547.001 - Registry Run Keys / Startup Folder,True,True,1,correct,medium,high
+16,SMB Lateral Movement Tooling,T1021.002,SMB/Windows Admin Shares,T1021.002,SMB/Windows Admin Shares,T1021.002 - SMB/Windows Admin Shares,True,True,1,correct,high,medium
+17,DNS Tunneling Volume Anomaly,T1071.004,DNS,T1568.001,Fast Flux DNS,T1568.001 - Fast Flux DNS,False,True,2,llm_selection_error,high,high
+18,Periodic Beaconing To External Host,T1071.001,Web Protocols,T1090.002,External Proxy,T1090.002 - External Proxy,False,False,,retrieval_miss,medium,high
+19,Suspicious Office Child Process,T1204.002,Malicious File,T1134.004,Parent PID Spoofing,T1134.004 - Parent PID Spoofing,False,False,,retrieval_miss,medium,high
+20,Privilege Escalation Attempt Via AlwaysInstallElevated,T1218.007,Msiexec,T1547.001,Registry Run Keys / Startup Folder,T1547.001 - Registry Run Keys / Startup Folder,False,True,3,llm_selection_error,high,medium
